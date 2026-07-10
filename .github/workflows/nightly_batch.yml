@@ -1,0 +1,61 @@
+name: Nightly Stock Analysis Batch
+
+on:
+  schedule:
+    # 매일 16:00 UTC = 01:00 KST (GitHub cron은 UTC 기준)
+    - cron: "0 16 * * *"
+  workflow_dispatch: {}   # 수동 실행 허용
+
+permissions:
+  contents: write         # SQLite DB 커밋백용
+
+concurrency:
+  group: nightly-batch
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # PostgreSQL 사용 시 저장소 Secrets에 DATABASE_URL 등록.
+          # 미등록 시 SQLite(data/trade_dash.db)로 폴백.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m src.main
+
+      # SQLite 모드: 결과 DB를 저장소에 커밋백 → 대시보드가 그대로 읽음.
+      # (PostgreSQL 사용 시 이 스텝은 변경 없음으로 스킵됨)
+      - name: Commit SQLite database
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f data/trade_dash.db || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: nightly analysis $(date -u +%F)"
+            git push
+          fi
+
+      - name: Upload DB artifact (백업)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trade-dash-db-${{ github.run_id }}
+          path: data/trade_dash.db
+          if-no-files-found: ignore
+          retention-days: 14
