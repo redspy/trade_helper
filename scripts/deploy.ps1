@@ -56,6 +56,12 @@ Write-Host "[deploy] dependencies installed"
 #   (글로벌 npm .ps1 shim은 깨지기 쉽고, PS5.1 stderr 문제도 있음)
 # PM2_HOME을 러너 루트에 고정 — 어떤 계정/세션에서든 같은 데몬을 조회 가능
 $env:PM2_HOME = Join-Path $runnerRoot "pm2-home"
+
+# ⚠️ 핵심: GitHub 러너는 잡 종료 시 GITHUB_ACTIONS_RUNNER_TRACKING_ID 환경변수를
+# 물려받은 프로세스를 전부 정리한다. 잡 안에서 처음 생성되는 pm2 데몬이 이 변수를
+# 상속하면 배포 완료 직후 데몬+대시보드가 함께 죽는다. 데몬을 띄우기 전에 비운다.
+# (helper는 데몬이 셋업 때 잡 밖에서 이미 떠 있었기에 이 문제가 없었음)
+$env:GITHUB_ACTIONS_RUNNER_TRACKING_ID = ""
 $pm2Root = Join-Path $runnerRoot "pm2-local"
 $pm2 = Join-Path $pm2Root "node_modules\pm2\bin\pm2"
 if (-not (Test-Path $pm2)) {
