@@ -77,6 +77,8 @@ class MarketDataCollector:
             "Open": "open", "High": "high", "Low": "low",
             "Close": "close", "Volume": "volume",
         })[["open", "high", "low", "close", "volume"]]
+        # 휴장/집계 경계에서 종가 없는 빈 행이 섞여 오는 경우 제거
+        df = df.dropna(subset=["close"])
         return enrich_with_indicators(df)
 
     @retry(**_RETRY)

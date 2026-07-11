@@ -136,6 +136,8 @@ def upsert_market_data(session: Session, ticker: str,
             "sma_60", "macd", "macd_signal", "macd_hist")
     count = 0
     for idx, row in df.iterrows():
+        if pd.isna(row.get("close")):   # 종가 없는 행은 저장하지 않음
+            continue
         trade_date = idx.date() if hasattr(idx, "date") else idx
         values = {c: (None if pd.isna(row.get(c)) else
                       (int(row[c]) if c == "volume" else float(row[c])))

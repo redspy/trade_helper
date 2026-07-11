@@ -67,3 +67,6 @@ class AnalysisResult(BaseModel):
     rationale: str = Field(
         description="최종 뷰 도출 근거 — 데이터를 인용한 3~5문장")
     summary: str = Field(description="대시보드 카드용 한 줄 요약 (40자 이내)")
+    beginner_note: str = Field(
+        description="주식 초보자를 위한 오늘의 행동 가이드 1~2문장 — 전문용어 없이 "
+                    "완전한 일상어로, '오늘 ~하는 게 좋아요' 형태의 실행 가능한 조언")
