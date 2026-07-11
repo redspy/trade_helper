@@ -1,0 +1,23 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Windows 러너 (helper와 동일 서버) 기준.
+      # Linux 러너로 옮기면 이 스텝을 `shell: bash` + scripts/deploy.sh 로 교체.
+      - name: Deploy
+        shell: powershell
+        run: scripts/deploy.ps1

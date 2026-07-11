@@ -6,56 +6,57 @@ on:
     - cron: "0 16 * * *"
   workflow_dispatch: {}   # 수동 실행 허용
 
-permissions:
-  contents: write         # SQLite DB 커밋백용
-
 concurrency:
   group: nightly-batch
   cancel-in-progress: false
 
 jobs:
   analyze:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # self-hosted 러너(서버)에서 실행 — 시크릿(.env)과 DB는 서버에 상주.
+    # ⚠️ DB는 반드시 워크스페이스 밖에 두어야 함 (.env의 DATABASE_URL을
+    #    절대경로로 지정) — checkout이 워크스페이스를 리셋하기 때문.
+    runs-on: self-hosted
+    timeout-minutes: 40
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
+      - name: Copy server .env
+        shell: powershell
+        run: |
+          $runnerRoot = (Resolve-Path "$env:GITHUB_WORKSPACE\..\..\..\").Path
+          Copy-Item (Join-Path $runnerRoot ".env") (Join-Path $env:GITHUB_WORKSPACE ".env") -Force
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Ensure dependencies
+        shell: powershell
+        run: |
+          if (-not (Test-Path ".venv")) { python -m venv .venv }
+          & ".\.venv\Scripts\python.exe" -m pip install -q -r requirements.txt
 
       - name: Run pipeline
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # PostgreSQL 사용 시 저장소 Secrets에 DATABASE_URL 등록.
-          # 미등록 시 SQLite(data/trade_dash.db)로 폴백.
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python -m src.main
+        shell: powershell
+        run: '& ".\.venv\Scripts\python.exe" -m src.main'
 
-      # SQLite 모드: 결과 DB를 저장소에 커밋백 → 대시보드가 그대로 읽음.
-      # (PostgreSQL 사용 시 이 스텝은 변경 없음으로 스킵됨)
-      - name: Commit SQLite database
+      - name: Backup database (SQLite, 7일 보관)
+        shell: powershell
+        run: '& ".\.venv\Scripts\python.exe" scripts/backup_db.py'
+
+      - name: Notify failure via Telegram
+        if: failure()
+        shell: powershell
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f data/trade_dash.db || true
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: nightly analysis $(date -u +%F)"
-            git push
-          fi
-
-      - name: Upload DB artifact (백업)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trade-dash-db-${{ github.run_id }}
-          path: data/trade_dash.db
-          if-no-files-found: ignore
-          retention-days: 14
+          # 서버 .env의 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 사용 (없으면 스킵)
+          $env:PYTHONIOENCODING = "utf-8"
+          $envMap = @{}
+          Get-Content ".env" | ForEach-Object {
+            if ($_ -match "^\s*([A-Z_]+)\s*=\s*(.+)\s*$") { $envMap[$Matches[1]] = $Matches[2] }
+          }
+          $token = $envMap["TELEGRAM_BOT_TOKEN"]; $chat = $envMap["TELEGRAM_CHAT_ID"]
+          if ($token -and $chat) {
+            $msg = "trade_dash 야간 배치 실패 - Actions 로그를 확인하세요: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            Invoke-RestMethod -Method Post -Uri "https://api.telegram.org/bot$token/sendMessage" `
+              -Body @{ chat_id = $chat; text = $msg } | Out-Null
+            Write-Host "[notify] Telegram 알림 전송"
+          } else {
+            Write-Host "[notify] TELEGRAM_* 미설정 - 알림 스킵"
+          }

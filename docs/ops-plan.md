@@ -86,10 +86,16 @@ deploy 스크립트 절차 (helper deploy.ps1과 동일 구조):
 {runner_root}/                  # helper와 동일 루트 공유 가능 (러너는 repo별 _work 분리)
 ├── run.cmd                     # GitHub Actions runner
 ├── .env                        # trade_dash 시크릿 (서버에만 존재, 절대 커밋 금지)
-└── _work/trade_dash/trade_dash # checkout + 실행 디렉토리
-    ├── .venv/
-    └── data/trade_dash.db      # 서버 소유 DB (+ backup/)
+├── trade-dash-data/            # ⚠️ DB는 워크스페이스 밖에 (checkout 리셋 대비)
+│   ├── trade_dash.db           #    .env: DATABASE_URL=sqlite:///{절대경로}
+│   └── backup/                 #    일자별 백업 (scripts/backup_db.py, 7일 보관)
+└── _work/trade_helper/trade_helper  # checkout + 실행 디렉토리
+    └── .venv/                  # 배포가 생성/재사용
 ```
+
+> **왜 DB를 밖에 두나**: self-hosted 러너에서 `actions/checkout`은 매 실행마다
+> 워크스페이스를 clean/reset 한다. DB가 안에 있으면 배치가 쌓은 데이터가
+> 다음 배포/배치 때 저장소 버전으로 되돌아간다.
 
 ## 6. 롤아웃 순서
 

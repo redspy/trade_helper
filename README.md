@@ -83,14 +83,20 @@ LLM_BACKEND=claude_cli CLAUDE_CLI_MODEL=sonnet python -m src.main
 `src/config.py`의 `DEFAULT_PAIRS`(삼성전자↔NVDA, SK하이닉스↔MU,
 LG엔솔↔TSLA, NAVER↔GOOGL)가 시드됩니다.
 
-## GitHub Actions 설정
+## CI/CD (helper 패턴 — GitHub Secrets 불사용)
 
-저장소 **Settings → Secrets and variables → Actions**:
+시크릿은 GitHub에 저장하지 않습니다. **서버(self-hosted runner) 루트의
+`.env`에만 존재**하며, 배포/배치 워크플로가 실행 시 워크스페이스로 복사합니다.
 
-- `ANTHROPIC_API_KEY` (CI에서는 API 백엔드 권장 — 러너에는 Claude 로그인
-  세션이 없으므로 `claude_cli` 백엔드를 쓰려면 `claude` CLI 설치 +
-  `CLAUDE_CODE_OAUTH_TOKEN` 시크릿 주입이 별도로 필요)
-- `DATABASE_URL` (선택 — 미설정 시 SQLite DB를 저장소에 커밋백)
+| 워크플로 | 트리거 | 러너 | 역할 |
+|---|---|---|---|
+| `ci.yml` | PR | GitHub-hosted | 문법 체크 + 스모크 테스트 (키 불필요) |
+| `deploy.yml` | main push | **self-hosted** | `.env` 복사 → venv → pm2로 대시보드 재시작 |
+| `nightly_batch.yml` | 01:00 KST cron | **self-hosted** | 배치 실행 → DB 백업 → 실패 시 Telegram 알림 |
+
+서버 `.env`에 넣을 것: `ANTHROPIC_API_KEY`(또는 `CLAUDE_CODE_OAUTH_TOKEN`),
+**워크스페이스 밖 절대경로의 `DATABASE_URL`**, 선택적으로 `TELEGRAM_*`.
+상세 절차는 `docs/ops-plan.md` 참고.
 
 크론 `0 16 * * *`(UTC) = 매일 01:00 KST. `workflow_dispatch`로 수동 실행 가능.
 
