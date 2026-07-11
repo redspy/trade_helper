@@ -89,8 +89,10 @@ deploy 스크립트 절차 (helper deploy.ps1과 동일 구조):
 ├── trade-dash-data/            # ⚠️ DB는 워크스페이스 밖에 (checkout 리셋 대비)
 │   ├── trade_dash.db           #    .env: DATABASE_URL=sqlite:///{절대경로}
 │   └── backup/                 #    일자별 백업 (scripts/backup_db.py, 7일 보관)
-└── _work/trade_helper/trade_helper  # checkout + 실행 디렉토리
-    └── .venv/                  # 배포가 생성/재사용
+├── trade-dash-app/             # ⚠️ 실행 디렉토리 (robocopy 배포 대상, venv 포함)
+│   └── .venv/                  #    앱은 반드시 여기서 실행 — 워크스페이스에서 직접
+│                               #    실행하면 파일 잠금으로 다음 checkout이 실패함
+└── _work/trade_helper/trade_helper  # checkout 전용 (실행 금지)
 ```
 
 > **왜 DB를 밖에 두나**: self-hosted 러너에서 `actions/checkout`은 매 실행마다

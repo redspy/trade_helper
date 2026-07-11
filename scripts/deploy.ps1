@@ -37,30 +37,14 @@ if (-not (Test-Path $envSource)) {
   throw "[deploy] ERROR: .env not found at: $envSource"
 }
 
-# .env 복사 (시크릿은 서버에만 상주)
-Copy-Item $envSource (Join-Path $env:GITHUB_WORKSPACE ".env") -Force
-Write-Host "[deploy] .env copied"
-
-Set-Location $env:GITHUB_WORKSPACE
-
-# venv 준비 (최초 1회 생성, 이후 재사용)
-if (-not (Test-Path ".venv")) {
-  Invoke-Native { python -m venv .venv }
-  Write-Host "[deploy] venv created"
-}
-
-Invoke-Native { & ".\.venv\Scripts\python.exe" -m pip install -q -r requirements.txt }
-Write-Host "[deploy] dependencies installed"
-
-# ---- pm2: helper 방식 — 글로벌 pm2 대신 로컬 설치본을 node로 직접 실행
+# ---- pm2 준비: helper 방식 — 글로벌 pm2 대신 로컬 설치본을 node로 직접 실행
 #   (글로벌 npm .ps1 shim은 깨지기 쉽고, PS5.1 stderr 문제도 있음)
 # PM2_HOME을 러너 루트에 고정 — 어떤 계정/세션에서든 같은 데몬을 조회 가능
 $env:PM2_HOME = Join-Path $runnerRoot "pm2-home"
 
-# ⚠️ 핵심: GitHub 러너는 잡 종료 시 GITHUB_ACTIONS_RUNNER_TRACKING_ID 환경변수를
-# 물려받은 프로세스를 전부 정리한다. 잡 안에서 처음 생성되는 pm2 데몬이 이 변수를
-# 상속하면 배포 완료 직후 데몬+대시보드가 함께 죽는다. 데몬을 띄우기 전에 비운다.
-# (helper는 데몬이 셋업 때 잡 밖에서 이미 떠 있었기에 이 문제가 없었음)
+# ⚠️ GitHub 러너는 잡 종료 시 GITHUB_ACTIONS_RUNNER_TRACKING_ID 환경변수를
+# 물려받은 프로세스를 정리한다. 잡 안에서 데몬이 처음 생성되는 경우를 대비해 비운다.
+# (정상 운용 시 데몬은 서버 부트스트랩으로 잡 밖에서 이미 떠 있음 — ops-plan §6.5)
 $env:GITHUB_ACTIONS_RUNNER_TRACKING_ID = ""
 $pm2Root = Join-Path $runnerRoot "pm2-local"
 $pm2 = Join-Path $pm2Root "node_modules\pm2\bin\pm2"
@@ -69,7 +53,41 @@ if (-not (Test-Path $pm2)) {
   Invoke-Native { npm install --prefix $pm2Root pm2 --no-fund --no-audit }
 }
 
-# 기존 프로세스 제거 후 새로 시작 (helper의 delete → start 방식)
+# ---- Step 1: 앱 정지 (app 디렉토리 파일 잠금 해제 — helper의 stop-first 방식)
+$ErrorActionPreference = "SilentlyContinue"
+node $pm2 stop trade-dash-web 2>&1 | Out-Null
+$ErrorActionPreference = "Stop"
+Write-Host "[deploy] app stopped (or was not running)"
+
+# ---- Step 2: 워크스페이스 → app 디렉토리 동기화 (helper의 robocopy 방식)
+# ⚠️ 앱을 워크스페이스에서 직접 실행하면 Windows 파일 잠금 때문에 다음 checkout이
+#    실패한다. 반드시 별도 app 디렉토리로 복사해 거기서 실행한다.
+$appDir = Join-Path $runnerRoot "trade-dash-app"
+if (-not (Test-Path $appDir)) {
+  New-Item -ItemType Directory -Path $appDir | Out-Null
+  Write-Host "[deploy] app directory created"
+}
+robocopy $env:GITHUB_WORKSPACE $appDir /E /XD .git .venv data __pycache__ /XF "*.db" /NFL /NDL /NJH /NJS | Out-Null
+if ($LASTEXITCODE -ge 8) {
+  throw "[deploy] robocopy failed (exit code $LASTEXITCODE)"
+}
+Write-Host "[deploy] source synced to $appDir"
+
+# .env 복사 (시크릿은 서버에만 상주)
+Copy-Item $envSource (Join-Path $appDir ".env") -Force
+Write-Host "[deploy] .env copied"
+
+Set-Location $appDir
+
+# ---- Step 3: venv 준비 (app 디렉토리 안, 최초 1회 생성 후 재사용)
+if (-not (Test-Path ".venv")) {
+  Invoke-Native { python -m venv .venv }
+  Write-Host "[deploy] venv created"
+}
+Invoke-Native { & ".\.venv\Scripts\python.exe" -m pip install -q -r requirements.txt }
+Write-Host "[deploy] dependencies installed"
+
+# ---- Step 4: 앱 시작 (helper의 delete → start → save 방식)
 $ErrorActionPreference = "SilentlyContinue"
 node $pm2 delete trade-dash-web 2>&1 | Out-Null
 node $pm2 start ecosystem.config.js 2>&1 | ForEach-Object { Write-Host "[pm2] $_" }
