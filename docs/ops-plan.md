@@ -107,6 +107,29 @@ deploy 스크립트 절차 (helper deploy.ps1과 동일 구조):
 4. `nightly_batch.yml`을 self-hosted로 전환, 커밋백 제거, 새벽 실행 1회 관찰
 5. Telegram 실패 알림 + 일자별 DB 백업 추가
 
+## 6.5 pm2 데몬 부트스트랩 (서버 1회 필수) — ⚠️ 잡 안에서 낳은 데몬은 죽는다
+
+서비스형 GitHub 러너는 잡 종료 시 Job Object로 자식 프로세스를 강제 정리하므로
+(환경변수 우회 불가), **배포 잡 안에서 처음 생성된 pm2 데몬은 잡이 끝나면
+대시보드와 함께 종료된다.** helper가 살아있는 이유는 데몬이 셋업 때 사용자
+세션(잡 밖)에서 태어났기 때문 — trade_dash도 동일하게 1회 부트스트랩한다:
+
+```powershell
+# 서버의 일반 PowerShell 창에서 1회
+$env:PM2_HOME = "D:\runners\trading-runner\pm2-home"
+$pm2 = "D:\runners\trading-runner\pm2-local\node_modules\pm2\bin\pm2"
+node $pm2 resurrect        # 마지막 pm2 save 상태(trade-dash-web) 복원
+node $pm2 list             # online 확인
+netstat -ano | findstr :8501
+
+# (선택) 재부팅 대비 — 로그온 시 자동 복원
+schtasks /Create /TN "trade-dash-pm2-resurrect" /SC ONLOGON /F `
+  /TR "cmd /c set PM2_HOME=D:\runners\trading-runner\pm2-home&& node D:\runners\trading-runner\pm2-local\node_modules\pm2\bin\pm2 resurrect"
+```
+
+이후의 배포 잡은 살아있는 데몬에 delete/start RPC만 보내므로(앱의 부모 = 잡 밖
+데몬) 잡이 끝나도 프로세스가 유지된다.
+
 ## 7. 운영 체크리스트
 
 - [ ] pm2 startup 등록 (서버 재부팅 시 자동 기동)
