@@ -7,6 +7,10 @@ chcp 65001 | Out-Null
 
 $ErrorActionPreference = "Stop"
 
+# Windows 기본 로케일(cp949)에서 UTF-8 파일(한글 주석 등)을 안전하게 읽도록 강제
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+
 # GITHUB_WORKSPACE = {runner_root}\_work\{repo}\{repo}
 $runnerRoot = (Resolve-Path "$env:GITHUB_WORKSPACE\..\..\..\").Path
 $envSource  = Join-Path $runnerRoot ".env"

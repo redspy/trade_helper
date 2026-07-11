@@ -17,6 +17,9 @@ jobs:
     #    절대경로로 지정) — checkout이 워크스페이스를 리셋하기 때문.
     runs-on: self-hosted
     timeout-minutes: 40
+    env:
+      PYTHONUTF8: "1"          # Windows cp949 로케일에서 UTF-8 강제
+      PYTHONIOENCODING: utf-8
 
     steps:
       - uses: actions/checkout@v4
