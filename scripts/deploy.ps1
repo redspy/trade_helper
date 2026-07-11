@@ -54,6 +54,8 @@ Write-Host "[deploy] dependencies installed"
 
 # ---- pm2: helper 방식 — 글로벌 pm2 대신 로컬 설치본을 node로 직접 실행
 #   (글로벌 npm .ps1 shim은 깨지기 쉽고, PS5.1 stderr 문제도 있음)
+# PM2_HOME을 러너 루트에 고정 — 어떤 계정/세션에서든 같은 데몬을 조회 가능
+$env:PM2_HOME = Join-Path $runnerRoot "pm2-home"
 $pm2Root = Join-Path $runnerRoot "pm2-local"
 $pm2 = Join-Path $pm2Root "node_modules\pm2\bin\pm2"
 if (-not (Test-Path $pm2)) {
@@ -70,5 +72,26 @@ node $pm2 save 2>&1 | Out-Null
 $ErrorActionPreference = "Stop"
 
 if (-not $startOk) { throw "[deploy] pm2 start failed" }
-Write-Host "[deploy] Dashboard started (trade-dash-web)"
+
+# ---- 기동 검증: 8501 헬스체크 (최대 60초 대기)
+Write-Host "[deploy] Waiting for dashboard health check..."
+$healthy = $false
+foreach ($i in 1..30) {
+  try {
+    $resp = Invoke-WebRequest -Uri "http://localhost:8501/_stcore/health" `
+              -UseBasicParsing -TimeoutSec 2
+    if ($resp.StatusCode -eq 200) { $healthy = $true; break }
+  } catch { }
+  Start-Sleep -Seconds 2
+}
+
+if (-not $healthy) {
+  Write-Host "[deploy] Health check FAILED - dumping pm2 status/logs:"
+  $ErrorActionPreference = "SilentlyContinue"
+  node $pm2 list 2>&1 | ForEach-Object { Write-Host "[pm2] $_" }
+  node $pm2 logs trade-dash-web --lines 40 --nostream 2>&1 | ForEach-Object { Write-Host "[pm2-log] $_" }
+  $ErrorActionPreference = "Stop"
+  throw "[deploy] dashboard did not become healthy on :8501"
+}
+Write-Host "[deploy] Dashboard healthy on :8501 (trade-dash-web)"
 Write-Host "[deploy] done"
